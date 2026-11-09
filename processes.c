@@ -20,6 +20,12 @@ struct syscall_data {
     __u64 total_ns;
 };
 
+struct proc_data {
+    char cpu_num;
+    __u64 on_cpu;
+    __u64 off_cpu;
+};
+
 void print_aggregated_data(struct processes_bpf *skel){
     int num_cpus = libbpf_num_possible_cpus();
     if (num_cpus < 0) {
@@ -33,31 +39,43 @@ void print_aggregated_data(struct processes_bpf *skel){
         return;
     }
 
-    int map_fd = bpf_map__fd(skel->maps.process_syscalls);
-    struct syscall_nr_and_pid key;
-    struct syscall_nr_and_pid next_key;
-    void *prev = NULL;
+    int proc_map_fd = bpf_map__fd(skel->maps.processes);
+    int sysc_pid_map_fd = bpf_map__fd(skel->maps.process_syscalls);
+
+    __u32 next_proc_key;
+    void *proc_prev = NULL;
+
+    struct syscall_nr_and_pid sysc_pid_next_key;
+    void *sysc_pid_prev;
 
     //printf("PID: %d\t [on-CPU: %f ms   off-CPU: %f ms   CPU: %d]\n", 1, 1.1, 1, 1);
-    printf("\t syscall_name \t start_time \t end_time \t runtime\n");
-    while (bpf_map_get_next_key(map_fd, prev, &next_key) == 0) {
-        if (bpf_map_lookup_elem(map_fd, &next_key, all_cpu_data) == 0){
-            __u64 count = 0;
-            __u64 total_ns = 0;
+    while (bpf_map_get_next_key(proc_map_fd, proc_prev, &next_proc_key) == 0) {
+        sysc_pid_prev = NULL;
+        __u32 pid = next_proc_key;
+        printf("------------------------\n");
+        printf("PID: %d\n", pid);
+        while (bpf_map_get_next_key(sysc_pid_map_fd, sysc_pid_prev, &sysc_pid_next_key) == 0) {
+            if (bpf_map_lookup_elem(sysc_pid_map_fd, &sysc_pid_next_key, all_cpu_data) == 0) {
+                if (sysc_pid_next_key.pid == pid) {
+                    __u64 count = 0;
+                    __u64 total_ns = 0;
 
-            for (int i = 0; i < num_cpus; i++) {
-                count += all_cpu_data[i].count;
-                total_ns += all_cpu_data[i].total_ns;
-            }
+                    for (int i = 0; i < num_cpus; i++) {
+                        count += all_cpu_data[i].count;
+                        total_ns += all_cpu_data[i].total_ns;
+                    }
             
-            printf("PID: %d - Syscall: %s\n", next_key.pid, get_syscall_name(next_key.syscall_nr));
-            printf("\t%llu, %llu\n\n", count, total_ns/count);
-            //printf("\t %d \t %f \t %f \t %f\n");
-
-            bpf_map_delete_elem(map_fd, &next_key);
+                    printf("\t%s %d %llu, %llu\n\n",
+                            get_syscall_name(sysc_pid_next_key.syscall_nr),
+                            sysc_pid_next_key.syscall_nr,
+                            count,
+                            total_ns/count);
+                }                
+            }
+            sysc_pid_prev = &sysc_pid_next_key;
         }
-        key = next_key;
-        prev = &key;
+        proc_prev = &next_proc_key;
+        printf("------------------------");
     }
 }
 
