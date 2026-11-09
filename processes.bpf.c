@@ -74,10 +74,19 @@ int catch_syscall_exit(struct bpf_raw_tracepoint_args *ctx) {
     __u64 runtime = bpf_ktime_get_ns() - e->enter_time;
     bpf_map_delete_elem(&running_syscalls, &pid_tgid);
 
-    //struct proc_data *p = bpf_map_lookup_elem(&processes, &pid);
-    //if (p) {
-        // Valami történik
-   // }
+    struct proc_data *p = bpf_map_lookup_elem(&processes, &pid);
+    if (p) {
+        p->cpu_num += 1;
+        p->on_cpu += 1;
+        p->off_cpu += 1;
+    }
+    else {
+        struct proc_data new = {};
+        new.cpu_num = 0;
+        new.on_cpu = 0;
+        new.off_cpu = 0;
+        bpf_map_update_elem(&processes, &pid, &new, BPF_ANY);
+    }
 
     struct syscall_nr_and_pid sys_proc = {};
     sys_proc.syscall_nr = syscall_nr;
